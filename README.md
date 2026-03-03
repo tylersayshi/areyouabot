@@ -91,6 +91,62 @@ jobs:
           reason: "Spam activity"
 ```
 
+## Using as a `/bot` Slash Command
+
+Maintainers can comment `/bot` on any issue or PR to check if the author is flagged. Only users with `MEMBER`, `COLLABORATOR`, or `OWNER` association on the repo can trigger the command.
+
+Add this workflow to `.github/workflows/bot-check.yml` in your repository:
+
+```yaml
+name: Bot Check Slash Command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  bot-check:
+    if: |
+      github.event.comment.body == '/bot' &&
+      contains(fromJSON('["MEMBER","COLLABORATOR","OWNER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get issue/PR author
+        id: author
+        run: echo "username=${{ github.event.issue.user.login }}" >> "$GITHUB_OUTPUT"
+
+      - uses: tylersayshi/areyouabot/action/check@main
+        id: bot-check
+        with:
+          username: ${{ steps.author.outputs.username }}
+
+      - name: Comment result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.bot-check.outputs.status }}';
+            const isFlagged = '${{ steps.bot-check.outputs.is_flagged }}';
+            const username = '${{ steps.author.outputs.username }}';
+            let body;
+            if (isFlagged === 'true') {
+              body = `⚠️ **@${username}** is flagged as a bot in [areyouabot](https://github.com/tylersayshi/areyouabot).`;
+            } else if (status === 'cleared') {
+              body = `✅ **@${username}** has been reviewed and cleared.`;
+            } else {
+              body = `ℹ️ **@${username}** has no record in [areyouabot](https://github.com/tylersayshi/areyouabot).`;
+            }
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+```
+
 ## Joining the Trusted Network
 
 1. [Open an application issue](../../issues/new?template=apply.yml)
@@ -143,25 +199,6 @@ Flagged accounts are stored as JSON files in `data/accounts/`:
 ```
 
 Trusted repos are listed in `data/trusted-repos.json`.
-
-## Labels
-
-The following labels are used by the automation:
-
-| Label | Purpose |
-|-------|---------|
-| `report` | Bot account report |
-| `apply` | Network application |
-| `apply/pending` | Application awaiting review |
-| `approved` | Application approved |
-| `appeal` | Flag appeal |
-| `appeal/pending` | Appeal awaiting review |
-| `appeal/approved` | Appeal approved |
-| `appeal/denied` | Appeal denied |
-
-## License
-
-[Beerware](./LICENSE)
 
 ## Author Note
 
