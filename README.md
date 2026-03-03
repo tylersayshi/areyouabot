@@ -91,14 +91,16 @@ jobs:
           reason: "Spam activity"
 ```
 
-## Using as a `/bot` Slash Command
+## Using as Slash Commands
 
-Maintainers can comment `/bot` on any issue or PR to check if the author is flagged. Only users with `MEMBER`, `COLLABORATOR`, or `OWNER` association on the repo can trigger the command.
+Maintainers can comment `/checkbot` or `/reportbot` on any issue or PR. Only users with `MEMBER`, `COLLABORATOR`, or `OWNER` association on the repo can trigger these commands.
 
 Add this workflow to `.github/workflows/bot-check.yml` in your repository:
 
+### `/checkbot` — Check if the author is flagged
+
 ```yaml
-name: Bot Check Slash Command
+name: Check Bot Slash Command
 
 on:
   issue_comment:
@@ -109,9 +111,9 @@ permissions:
   pull-requests: write
 
 jobs:
-  bot-check:
+  checkbot:
     if: |
-      github.event.comment.body == '/bot' &&
+      github.event.comment.body == '/checkbot' &&
       contains(fromJSON('["MEMBER","COLLABORATOR","OWNER"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
@@ -138,6 +140,60 @@ jobs:
               body = `✅ **@${username}** has been reviewed and cleared.`;
             } else {
               body = `ℹ️ **@${username}** has no record in [areyouabot](https://github.com/tylersayshi/areyouabot).`;
+            }
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+```
+
+### `/reportbot` — Report the author as a bot
+
+This requires your repo to be in the [trusted reporter network](#joining-the-trusted-network).
+
+```yaml
+name: Report Bot Slash Command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  reportbot:
+    if: |
+      github.event.comment.body == '/reportbot' &&
+      contains(fromJSON('["MEMBER","COLLABORATOR","OWNER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get issue/PR author
+        id: author
+        run: echo "username=${{ github.event.issue.user.login }}" >> "$GITHUB_OUTPUT"
+
+      - uses: tylersayshi/areyouabot/action/report@main
+        id: bot-report
+        with:
+          username: ${{ steps.author.outputs.username }}
+          reason: "Reported via /reportbot by ${{ github.event.comment.user.login }}"
+          evidence_url: ${{ github.event.issue.html_url }}
+
+      - name: Comment result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const username = '${{ steps.author.outputs.username }}';
+            const isFlagged = '${{ steps.bot-report.outputs.is_flagged }}';
+            let body;
+            if (isFlagged === 'true') {
+              body = `🚫 **@${username}** has been reported as a bot to [areyouabot](https://github.com/tylersayshi/areyouabot).`;
+            } else {
+              body = `❌ Failed to report **@${username}**. Make sure this repo is in the trusted reporter network.`;
             }
             github.rest.issues.createComment({
               owner: context.repo.owner,

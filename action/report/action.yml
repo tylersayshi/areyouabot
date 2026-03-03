@@ -3,96 +3,84 @@ description: "Report a suspected bot account to the areyouabot database"
 author: "areyouabot"
 
 inputs:
-  username:
-    description: "GitHub username to report"
-    required: true
-  reason:
-    description: "Reason for the report"
-    required: true
-  evidence_url:
-    description: "URL to evidence (issue, PR, comment, etc.)"
-    required: false
-    default: ""
-  repository:
-    description: "Reporting repository in owner/repo format (defaults to current repo)"
-    required: false
-    default: ${{ github.repository }}
-  worker_url:
-    description: "URL of the areyouabot Cloudflare Worker"
-    required: false
-    default: "https://areyouabot-report.tylersayshi.workers.dev"
-  areyouabot_repo:
-    description: "Owner/repo of the areyouabot database"
-    required: false
-    default: "tylersayshi/areyouabot"
+ username:
+  description: "GitHub username to report"
+  required: true
+ reason:
+  description: "Reason for the report"
+  required: true
+ evidence_url:
+  description: "URL to evidence (issue, PR, comment, etc.)"
+  required: false
+  default: ""
 
 outputs:
-  is_flagged:
-    description: "Whether the user is now flagged (true/false)"
-    value: ${{ steps.report-result.outputs.is_flagged }}
-  status:
-    description: "Account status after report"
-    value: ${{ steps.report-result.outputs.status }}
+ is_flagged:
+  description: "Whether the user is now flagged (true/false)"
+  value: ${{ steps.report-result.outputs.is_flagged }}
+ status:
+  description: "Account status after report"
+  value: ${{ steps.report-result.outputs.status }}
 
 runs:
-  using: "composite"
-  steps:
-    - name: Request OIDC token
-      id: oidc
-      shell: bash
-      run: |
-        if [[ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]]; then
-          echo "::error::OIDC token not available. Add 'permissions: id-token: write' to your workflow."
-          exit 1
-        fi
+ using: "composite"
+ steps:
+  - name: Request OIDC token
+    id: oidc
+    shell: bash
+    run: |
+     if [[ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]]; then
+       echo "::error::OIDC token not available. Add 'permissions: id-token: write' to your workflow."
+       exit 1
+     fi
 
-        OIDC_TOKEN=$(curl -sS \
-          -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${{ inputs.worker_url }}" \
-          | jq -r '.value')
+     OIDC_TOKEN=$(curl -sS \
+       -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+       "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://areyouabot-report.tylerjlawson2.workers.dev" \
+       | jq -r '.value')
 
-        if [[ -z "$OIDC_TOKEN" || "$OIDC_TOKEN" == "null" ]]; then
-          echo "::error::Failed to retrieve OIDC token"
-          exit 1
-        fi
+     if [[ -z "$OIDC_TOKEN" || "$OIDC_TOKEN" == "null" ]]; then
+       echo "::error::Failed to retrieve OIDC token"
+       exit 1
+     fi
 
-        echo "::add-mask::$OIDC_TOKEN"
-        echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+     echo "::add-mask::$OIDC_TOKEN"
+     echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
 
-    - name: Submit report to worker
-      id: report
-      shell: bash
-      run: |
-        RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST "${{ inputs.worker_url }}" \
-          -H "Authorization: Bearer ${{ steps.oidc.outputs.token }}" \
-          -H "Content-Type: application/json" \
-          -d "$(jq -n \
-            --arg username "${{ inputs.username }}" \
-            --arg reason "${{ inputs.reason }}" \
-            --arg evidence_url "${{ inputs.evidence_url }}" \
-            --arg repository "${{ inputs.repository }}" \
-            '{username: $username, reason: $reason, evidence_url: $evidence_url, repository: $repository}'
-          )")
+  - name: Submit report to worker
+    id: report
+    shell: bash
+    run: |
+     RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST "https://areyouabot-report.tylerjlawson2.workers.dev" \
+       -H "Authorization: Bearer ${{ steps.oidc.outputs.token }}" \
+       -H "Content-Type: application/json" \
+       -d "$(jq -n \
+         --arg username "${{ inputs.username }}" \
+         --arg reason "${{ inputs.reason }}" \
+         --arg evidence_url "${{ inputs.evidence_url }}" \
+         --arg repository "$GITHUB_REPOSITORY" \
+         '{username: $username, reason: $reason, evidence_url: $evidence_url, repository: $repository}'
+       )")
 
-        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-        BODY=$(echo "$RESPONSE" | sed '$d')
+     HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+     BODY=$(echo "$RESPONSE" | sed '$d')
 
-        echo "response=$BODY" >> "$GITHUB_OUTPUT"
-        echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+     echo "response=$BODY" >> "$GITHUB_OUTPUT"
+     echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
 
-        SUCCESS=$(echo "$BODY" | jq -r '.success // false')
-        MESSAGE=$(echo "$BODY" | jq -r '.message // "Unknown error"')
+     SUCCESS=$(echo "$BODY" | jq -r '.success // false')
+     MESSAGE=$(echo "$BODY" | jq -r '.message // "Unknown error"')
 
-        if [[ "$SUCCESS" != "true" ]]; then
-          echo "::error::Report failed: $MESSAGE"
-          exit 1
-        fi
+     if [[ "$SUCCESS" != "true" ]]; then
+       echo "::error::Report failed: $MESSAGE"
+       exit 1
+     fi
 
-        echo "Report submitted successfully: $MESSAGE"
+     echo "Report submitted successfully: $MESSAGE"
 
-    - name: Set outputs
-      id: report-result
-      shell: bash
-      run: |
-        echo "is_flagged=true" >> "$GITHUB_OUTPUT"
-        echo "status=flagged" >> "$GITHUB_OUTPUT"
+  - name: Set outputs
+    id: report-result
+    shell: bash
+    run: |
+     echo "is_flagged=true" >> "$GITHUB_OUTPUT"
+     echo "status=flagged" >> "$GITHUB_OUTPUT"
