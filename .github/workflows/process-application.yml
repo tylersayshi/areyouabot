@@ -31,8 +31,8 @@ jobs:
       - name: Validate application
         id: validate
         env:
-          REPOSITORY: ${{ steps.parse.outputs.repository }}
-          MAINTAINER: ${{ steps.parse.outputs.maintainer }}
+          REPOSITORY: ${{ steps.parse.outputs.issueparser_repository }}
+          MAINTAINER: ${{ steps.parse.outputs.issueparser_maintainer }}
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/process-application.sh
@@ -127,8 +127,8 @@ jobs:
 
       - name: Add to trusted repos
         env:
-          REPOSITORY: ${{ steps.parse.outputs.repository }}
-          MAINTAINER: ${{ steps.parse.outputs.maintainer }}
+          REPOSITORY: ${{ steps.parse.outputs.issueparser_repository }}
+          MAINTAINER: ${{ steps.parse.outputs.issueparser_maintainer }}
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/process-application.sh
@@ -138,7 +138,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/trusted-repos.json
-          git commit -m "Add ${{ steps.parse.outputs.repository }} to trusted network (via #${{ github.event.issue.number }})"
+          git commit -m "Add ${{ steps.parse.outputs.issueparser_repository }} to trusted network (via #${{ github.event.issue.number }})"
           git push
 
       - name: Comment and close
@@ -149,7 +149,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: '**Application approved!** Repository `${{ steps.parse.outputs.repository }}` has been added to the trusted reporter network.\n\nYou can now use the areyouabot action to submit reports.'
+              body: '**Application approved!** Repository `${{ steps.parse.outputs.issueparser_repository }}` has been added to the trusted reporter network.\n\nYou can now use the areyouabot action to submit reports.'
             });
             await github.rest.issues.update({
               owner: context.repo.owner,

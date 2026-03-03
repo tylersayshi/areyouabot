@@ -29,10 +29,10 @@ jobs:
       - name: Process report
         id: report
         env:
-          USERNAME: ${{ steps.parse.outputs.username }}
-          REPORTING_REPO: ${{ steps.parse.outputs.reporting_repo }}
-          REASON: ${{ steps.parse.outputs.reason }}
-          EVIDENCE_URL: ${{ steps.parse.outputs.evidence_url }}
+          USERNAME: ${{ steps.parse.outputs.issueparser_username }}
+          REPORTING_REPO: ${{ steps.parse.outputs.issueparser_reporting_repo }}
+          REASON: ${{ steps.parse.outputs.issueparser_reason }}
+          EVIDENCE_URL: ${{ steps.parse.outputs.issueparser_evidence_url }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: bash scripts/process-report.sh
 
@@ -42,7 +42,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/accounts/
-          git commit -m "Report: flag ${{ steps.parse.outputs.username }} (via #${{ github.event.issue.number }})"
+          git commit -m "Report: flag ${{ steps.parse.outputs.issueparser_username }} (via #${{ github.event.issue.number }})"
           git push
 
       - name: Comment and close (success)
@@ -50,7 +50,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const username = '${{ steps.parse.outputs.username }}'.toLowerCase();
+            const username = '${{ steps.parse.outputs.issueparser_username }}'.toLowerCase();
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -73,7 +73,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `**Report rejected.** Repository \`${{ steps.parse.outputs.reporting_repo }}\` is not in the trusted reporter network.\n\nTo join, open an application issue.`
+              body: `**Report rejected.** Repository \`${{ steps.parse.outputs.issueparser_reporting_repo }}\` is not in the trusted reporter network.\n\nTo join, open an application issue.`
             });
             await github.rest.issues.update({
               owner: context.repo.owner,

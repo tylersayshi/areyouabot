@@ -33,7 +33,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const username = '${{ steps.parse.outputs.username }}'.toLowerCase();
+            const username = '${{ steps.parse.outputs.issueparser_username }}'.toLowerCase();
             const { data: issues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -73,7 +73,7 @@ jobs:
         if: steps.dupes.outputs.has_duplicate != 'true'
         id: validate
         env:
-          USERNAME: ${{ steps.parse.outputs.username }}
+          USERNAME: ${{ steps.parse.outputs.issueparser_username }}
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           ACTION: validate
         run: bash scripts/handle-appeal.sh
@@ -168,7 +168,7 @@ jobs:
 
       - name: Approve appeal
         env:
-          USERNAME: ${{ steps.parse.outputs.username }}
+          USERNAME: ${{ steps.parse.outputs.issueparser_username }}
           ACTION: approve
         run: bash scripts/handle-appeal.sh
 
@@ -177,7 +177,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/accounts/
-          git commit -m "Appeal approved: clear ${{ steps.parse.outputs.username }} (via #${{ github.event.issue.number }})"
+          git commit -m "Appeal approved: clear ${{ steps.parse.outputs.issueparser_username }} (via #${{ github.event.issue.number }})"
           git push
 
       - name: Comment and close
@@ -188,7 +188,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: '**Appeal approved.** Account `${{ steps.parse.outputs.username }}` has been cleared.'
+              body: '**Appeal approved.** Account `${{ steps.parse.outputs.issueparser_username }}` has been cleared.'
             });
             await github.rest.issues.update({
               owner: context.repo.owner,
@@ -215,7 +215,7 @@ jobs:
 
       - name: Deny appeal
         env:
-          USERNAME: ${{ steps.parse.outputs.username }}
+          USERNAME: ${{ steps.parse.outputs.issueparser_username }}
           ACTION: deny
         run: bash scripts/handle-appeal.sh
 
@@ -224,7 +224,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/accounts/
-          git commit -m "Appeal denied: ${{ steps.parse.outputs.username }} remains flagged (via #${{ github.event.issue.number }})"
+          git commit -m "Appeal denied: ${{ steps.parse.outputs.issueparser_username }} remains flagged (via #${{ github.event.issue.number }})"
           git push
 
       - name: Comment and close
@@ -235,7 +235,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: '**Appeal denied.** Account `${{ steps.parse.outputs.username }}` remains flagged.'
+              body: '**Appeal denied.** Account `${{ steps.parse.outputs.issueparser_username }}` remains flagged.'
             });
             await github.rest.issues.update({
               owner: context.repo.owner,
