@@ -1,0 +1,39 @@
+name: Apply to Trusted Reporter Network
+description: Request to join the trusted reporter network
+title: "[APPLY] {repository}"
+labels: ["apply"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Join the Trusted Reporter Network
+
+        Submit this form to apply for your repository to become a trusted reporter.
+        You must be a maintainer of the repository you're applying with.
+
+  - type: input
+    id: repository
+    attributes:
+      label: Repository
+      description: "Full repository name (owner/repo)"
+      placeholder: "octocat/my-repo"
+    validations:
+      required: true
+
+  - type: input
+    id: maintainer
+    attributes:
+      label: Maintainer GitHub Username
+      description: "Your GitHub username (must match the issue author)"
+      placeholder: "octocat"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: Reason for Joining
+      description: "Why does your repository need to report bot accounts?"
+      placeholder: "We maintain an open-source project and frequently encounter bot accounts..."
+    validations:
+      required: true

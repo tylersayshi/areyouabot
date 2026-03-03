@@ -1,0 +1,48 @@
+name: "areyouabot - Check"
+description: "Check if a GitHub user is flagged as a bot"
+author: "areyouabot"
+
+inputs:
+  username:
+    description: "GitHub username to check"
+    required: true
+  areyouabot_repo:
+    description: "Owner/repo of the areyouabot database"
+    required: false
+    default: "tylersayshi/areyouabot"
+
+outputs:
+  is_flagged:
+    description: "Whether the user is flagged (true/false)"
+    value: ${{ steps.check.outputs.is_flagged }}
+  status:
+    description: "Account status: flagged, cleared, or unknown"
+    value: ${{ steps.check.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check account status
+      id: check
+      shell: bash
+      run: |
+        REPO="${{ inputs.areyouabot_repo }}"
+        OWNER="${REPO%%/*}"
+        REPO_NAME="${REPO##*/}"
+        USERNAME="$(echo "${{ inputs.username }}" | tr '[:upper:]' '[:lower:]')"
+        URL="https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/main/data/accounts/${USERNAME}.json"
+
+        HTTP_CODE=$(curl -s -o /tmp/areyouabot-check.json -w "%{http_code}" "$URL")
+
+        if [[ "$HTTP_CODE" == "200" ]]; then
+          STATUS=$(jq -r '.status' /tmp/areyouabot-check.json)
+          if [[ "$STATUS" == "flagged" ]]; then
+            echo "is_flagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_flagged=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_flagged=false" >> "$GITHUB_OUTPUT"
+          echo "status=unknown" >> "$GITHUB_OUTPUT"
+        fi

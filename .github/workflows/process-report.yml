@@ -1,0 +1,83 @@
+name: Process Bot Report
+
+on:
+  issues:
+    types: [opened]
+
+concurrency:
+  group: data-write
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  process:
+    if: contains(github.event.issue.labels.*.name, 'report')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue body
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/report.yml
+
+      - name: Process report
+        id: report
+        env:
+          USERNAME: ${{ steps.parse.outputs.username }}
+          REPORTING_REPO: ${{ steps.parse.outputs.reporting_repo }}
+          REASON: ${{ steps.parse.outputs.reason }}
+          EVIDENCE_URL: ${{ steps.parse.outputs.evidence_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: bash scripts/process-report.sh
+
+      - name: Commit data
+        if: steps.report.outputs.result == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/accounts/
+          git commit -m "Report: flag ${{ steps.parse.outputs.username }} (via #${{ github.event.issue.number }})"
+          git push
+
+      - name: Comment and close (success)
+        if: steps.report.outputs.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const username = '${{ steps.parse.outputs.username }}'.toLowerCase();
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `**Report processed.** Account \`${username}\` has been flagged.\n\nData file: [\`data/accounts/${username}.json\`](../blob/main/data/accounts/${username}.json)`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Comment and close (untrusted)
+        if: steps.report.outputs.result == 'untrusted'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `**Report rejected.** Repository \`${{ steps.parse.outputs.reporting_repo }}\` is not in the trusted reporter network.\n\nTo join, open an application issue.`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });

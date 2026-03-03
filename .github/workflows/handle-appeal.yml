@@ -1,0 +1,245 @@
+name: Handle Appeal
+
+on:
+  issues:
+    types: [opened, labeled]
+
+concurrency:
+  group: data-write
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  validate:
+    if: |
+      github.event.action == 'opened' &&
+      contains(github.event.issue.labels.*.name, 'appeal')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue body
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/appeal.yml
+
+      - name: Check for duplicate open appeals
+        id: dupes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const username = '${{ steps.parse.outputs.username }}'.toLowerCase();
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'appeal',
+              state: 'open'
+            });
+            const duplicates = issues.filter(i =>
+              i.number !== context.issue.number &&
+              i.title.toLowerCase().includes(username)
+            );
+            if (duplicates.length > 0) {
+              core.setOutput('has_duplicate', 'true');
+              core.setOutput('duplicate_number', duplicates[0].number);
+            } else {
+              core.setOutput('has_duplicate', 'false');
+            }
+
+      - name: Close duplicate
+        if: steps.dupes.outputs.has_duplicate == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `**Appeal rejected.** A duplicate open appeal already exists: #${{ steps.dupes.outputs.duplicate_number }}`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Validate appeal
+        if: steps.dupes.outputs.has_duplicate != 'true'
+        id: validate
+        env:
+          USERNAME: ${{ steps.parse.outputs.username }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ACTION: validate
+        run: bash scripts/handle-appeal.sh
+
+      - name: Comment (validation failed - author mismatch)
+        if: steps.dupes.outputs.has_duplicate != 'true' && failure() && steps.validate.outputs.result == 'author_mismatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Appeal rejected.** Your GitHub username does not match the flagged account.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Comment (not found)
+        if: steps.dupes.outputs.has_duplicate != 'true' && failure() && steps.validate.outputs.result == 'not_found'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Appeal rejected.** No flag record found for this username.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Comment (not flagged)
+        if: steps.dupes.outputs.has_duplicate != 'true' && failure() && steps.validate.outputs.result == 'not_flagged'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Appeal rejected.** This account is not currently flagged.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Add pending label
+        if: steps.dupes.outputs.has_duplicate != 'true' && steps.validate.outputs.result == 'valid'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['appeal/pending']
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Appeal validated.** Awaiting maintainer review.\n\nA maintainer will add `appeal/approved` or `appeal/denied` to resolve this appeal.'
+            });
+
+  approve:
+    if: |
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'appeal/approved' &&
+      contains(github.event.issue.labels.*.name, 'appeal')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue body
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/appeal.yml
+
+      - name: Approve appeal
+        env:
+          USERNAME: ${{ steps.parse.outputs.username }}
+          ACTION: approve
+        run: bash scripts/handle-appeal.sh
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/accounts/
+          git commit -m "Appeal approved: clear ${{ steps.parse.outputs.username }} (via #${{ github.event.issue.number }})"
+          git push
+
+      - name: Comment and close
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Appeal approved.** Account `${{ steps.parse.outputs.username }}` has been cleared.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+  deny:
+    if: |
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'appeal/denied' &&
+      contains(github.event.issue.labels.*.name, 'appeal')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue body
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/appeal.yml
+
+      - name: Deny appeal
+        env:
+          USERNAME: ${{ steps.parse.outputs.username }}
+          ACTION: deny
+        run: bash scripts/handle-appeal.sh
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/accounts/
+          git commit -m "Appeal denied: ${{ steps.parse.outputs.username }} remains flagged (via #${{ github.event.issue.number }})"
+          git push
+
+      - name: Comment and close
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Appeal denied.** Account `${{ steps.parse.outputs.username }}` remains flagged.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });

@@ -1,0 +1,159 @@
+name: Process Application
+
+on:
+  issues:
+    types: [opened, labeled]
+
+concurrency:
+  group: data-write
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  validate:
+    if: |
+      github.event.action == 'opened' &&
+      contains(github.event.issue.labels.*.name, 'apply')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue body
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/apply.yml
+
+      - name: Validate application
+        id: validate
+        env:
+          REPOSITORY: ${{ steps.parse.outputs.repository }}
+          MAINTAINER: ${{ steps.parse.outputs.maintainer }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/process-application.sh
+
+      - name: Comment (validation failed - author mismatch)
+        if: failure() && steps.validate.outputs.result == 'author_mismatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Application rejected.** Issue author does not match the claimed maintainer username.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Comment (already trusted)
+        if: failure() && steps.validate.outputs.result == 'already_trusted'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Application rejected.** Repository is already in the trusted reporter network.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Comment (repo not found)
+        if: failure() && steps.validate.outputs.result == 'repo_not_found'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Application rejected.** Repository does not exist or is not publicly accessible.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+      - name: Add pending label
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['apply/pending']
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Application validated.** Awaiting maintainer review.\n\nA maintainer will add the `approved` label to approve this application.'
+            });
+
+  approve:
+    if: |
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'approved' &&
+      contains(github.event.issue.labels.*.name, 'apply')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse issue body
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/apply.yml
+
+      - name: Add to trusted repos
+        env:
+          REPOSITORY: ${{ steps.parse.outputs.repository }}
+          MAINTAINER: ${{ steps.parse.outputs.maintainer }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/process-application.sh
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/trusted-repos.json
+          git commit -m "Add ${{ steps.parse.outputs.repository }} to trusted network (via #${{ github.event.issue.number }})"
+          git push
+
+      - name: Comment and close
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '**Application approved!** Repository `${{ steps.parse.outputs.repository }}` has been added to the trusted reporter network.\n\nYou can now use the areyouabot action to submit reports.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });

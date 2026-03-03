@@ -1,0 +1,133 @@
+name: "areyouabot"
+description: "Report suspected bot accounts and check if a GitHub user is flagged"
+author: "areyouabot"
+
+inputs:
+  mode:
+    description: 'Action mode: "report" or "check"'
+    required: true
+  username:
+    description: "GitHub username to report or check"
+    required: true
+  reason:
+    description: "Reason for the report (report mode only)"
+    required: false
+    default: ""
+  evidence_url:
+    description: "URL to evidence (report mode only)"
+    required: false
+    default: ""
+  repository:
+    description: "Reporting repository in owner/repo format (report mode only, defaults to current repo)"
+    required: false
+    default: ${{ github.repository }}
+  worker_url:
+    description: "URL of the areyouabot Cloudflare Worker (report mode only)"
+    required: false
+    default: "https://areyouabot-report.tylersayshi.workers.dev"
+  areyouabot_repo:
+    description: "Owner/repo of the areyouabot database (default: tylersayshi/areyouabot)"
+    required: false
+    default: "tylersayshi/areyouabot"
+
+outputs:
+  is_flagged:
+    description: "Whether the user is flagged (true/false)"
+    value: ${{ steps.check.outputs.is_flagged || steps.report-result.outputs.is_flagged }}
+  status:
+    description: "Account status: flagged, cleared, or unknown"
+    value: ${{ steps.check.outputs.status || steps.report-result.outputs.status }}
+
+runs:
+  using: "composite"
+  steps:
+    # --- Check mode ---
+    - name: Check account status
+      if: inputs.mode == 'check'
+      id: check
+      shell: bash
+      run: |
+        REPO="${{ inputs.areyouabot_repo }}"
+        OWNER="${REPO%%/*}"
+        REPO_NAME="${REPO##*/}"
+        USERNAME="$(echo "${{ inputs.username }}" | tr '[:upper:]' '[:lower:]')"
+        URL="https://raw.githubusercontent.com/${OWNER}/${REPO_NAME}/main/data/accounts/${USERNAME}.json"
+
+        HTTP_CODE=$(curl -s -o /tmp/areyouabot-check.json -w "%{http_code}" "$URL")
+
+        if [[ "$HTTP_CODE" == "200" ]]; then
+          STATUS=$(jq -r '.status' /tmp/areyouabot-check.json)
+          if [[ "$STATUS" == "flagged" ]]; then
+            echo "is_flagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_flagged=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_flagged=false" >> "$GITHUB_OUTPUT"
+          echo "status=unknown" >> "$GITHUB_OUTPUT"
+        fi
+
+    # --- Report mode ---
+    - name: Request OIDC token
+      if: inputs.mode == 'report'
+      id: oidc
+      shell: bash
+      run: |
+        if [[ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]]; then
+          echo "::error::OIDC token not available. Add 'permissions: id-token: write' to your workflow."
+          exit 1
+        fi
+
+        OIDC_TOKEN=$(curl -sS \
+          -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${{ inputs.worker_url }}" \
+          | jq -r '.value')
+
+        if [[ -z "$OIDC_TOKEN" || "$OIDC_TOKEN" == "null" ]]; then
+          echo "::error::Failed to retrieve OIDC token"
+          exit 1
+        fi
+
+        echo "::add-mask::$OIDC_TOKEN"
+        echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+
+    - name: Submit report to worker
+      if: inputs.mode == 'report'
+      id: report
+      shell: bash
+      run: |
+        RESPONSE=$(curl -sS -w "\n%{http_code}" -X POST "${{ inputs.worker_url }}" \
+          -H "Authorization: Bearer ${{ steps.oidc.outputs.token }}" \
+          -H "Content-Type: application/json" \
+          -d "$(jq -n \
+            --arg username "${{ inputs.username }}" \
+            --arg reason "${{ inputs.reason }}" \
+            --arg evidence_url "${{ inputs.evidence_url }}" \
+            --arg repository "${{ inputs.repository }}" \
+            '{username: $username, reason: $reason, evidence_url: $evidence_url, repository: $repository}'
+          )")
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        echo "response=$BODY" >> "$GITHUB_OUTPUT"
+        echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+
+        SUCCESS=$(echo "$BODY" | jq -r '.success // false')
+        MESSAGE=$(echo "$BODY" | jq -r '.message // "Unknown error"')
+
+        if [[ "$SUCCESS" != "true" ]]; then
+          echo "::error::Report failed: $MESSAGE"
+          exit 1
+        fi
+
+        echo "Report submitted successfully: $MESSAGE"
+
+    - name: Set report outputs
+      if: inputs.mode == 'report'
+      id: report-result
+      shell: bash
+      run: |
+        echo "is_flagged=true" >> "$GITHUB_OUTPUT"
+        echo "status=flagged" >> "$GITHUB_OUTPUT"

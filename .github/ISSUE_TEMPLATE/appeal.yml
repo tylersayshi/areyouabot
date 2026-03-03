@@ -1,0 +1,39 @@
+name: Appeal a Flag
+description: Contest a bot flag on your account
+title: "[APPEAL] {username}"
+labels: ["appeal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Appeal a Bot Flag
+
+        If your account has been flagged as a bot, you can use this form to appeal.
+        You must be the owner of the flagged account (your GitHub username must match).
+
+  - type: input
+    id: username
+    attributes:
+      label: Username
+      description: "Your GitHub username (must match the issue author)"
+      placeholder: "my-username"
+    validations:
+      required: true
+
+  - type: textarea
+    id: explanation
+    attributes:
+      label: Explanation
+      description: "Why should your account be cleared?"
+      placeholder: "I am a real person. My account was flagged because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting Evidence
+      description: "Any links or information that support your appeal"
+      placeholder: "Links to legitimate contributions, profile information, etc."
+    validations:
+      required: false
