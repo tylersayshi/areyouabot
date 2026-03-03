@@ -1,6 +1,6 @@
-name: "areyouabot"
+name: "areyouabot-report"
 description: "Report suspected bot accounts and check if a GitHub user is flagged"
-author: "areyouabot"
+author: "tylersayshi"
 
 inputs:
   mode:
