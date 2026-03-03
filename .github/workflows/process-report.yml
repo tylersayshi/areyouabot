@@ -5,7 +5,7 @@ on:
     types: [opened]
 
 concurrency:
-  group: data-write
+  group: data-write-report
   cancel-in-progress: false
 
 permissions:
